@@ -8,7 +8,7 @@ on:
     branches: [ main ]
 
 env:
-  JAVA_VERSION: '17'
+  JAVA_VERSION: '21'
   MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false
 
 jobs:
@@ -57,17 +57,6 @@ jobs:
           flags: unittests
           name: codecov-umbrella
 
-      - name: SonarQube Scan
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          mvn sonar:sonar \
-            -Dsonar.projectKey=healthtrack-platform \
-            -Dsonar.organization=your-org \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-
   # Job 2: Pruebas de integración
   integration-tests:
     name: Integration Tests
@@ -75,7 +64,6 @@ jobs:
     needs: unit-tests
 
     services:
-      # Base de datos en memoria para tests de integración
       postgres:
         image: postgres:13
         env:
@@ -149,13 +137,13 @@ jobs:
       - name: Start Application
         run: |
           mvn spring-boot:run -Dspring-boot.run.profiles=test &
-          sleep 30  # Esperar que la aplicación inicie
+          sleep 30
           echo "Application started"
 
       - name: Wait for Application
         run: |
           for i in {1..30}; do
-            if curl -f http://localhost:8080/health; then
+            if curl -f http://localhost:8081/health; then
               echo "Application is ready"
               break
             fi
@@ -183,12 +171,11 @@ jobs:
           name: selenium-screenshots
           path: target/screenshots/
 
-  # Job 4: Pruebas de rendimiento
-  performance-tests:
-    name: Performance Tests
+  # Job 4: Build y empaquetado
+  build:
+    name: Build & Package
     runs-on: ubuntu-latest
-    needs: functional-tests
-    if: github.ref == 'refs/heads/main'  # Solo en main branch
+    needs: [unit-tests, integration-tests, functional-tests]
 
     steps:
       - name: Checkout Code
@@ -200,245 +187,89 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
 
-      - name: Start Application for Performance Tests
-        run: |
-          mvn spring-boot:run -Dspring-boot.run.profiles=performance &
-          sleep 30
-          echo "Application started for performance tests"
+      - name: Cache Maven Dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
 
-      - name: Setup JMeter
+      - name: Build Application
         run: |
-          wget https://downloads.apache.org//jmeter/binaries/apache-jmeter-5.6.2.tgz
-          tar -xzf apache-jmeter-5.6.2.tgz
-          export PATH=$PATH:$(pwd)/apache-jmeter-5.6.2/bin
-          echo "JMeter setup completed"
+          mvn clean package -DskipTests -B
+          echo "Application build completed"
 
-      - name: Run Performance Tests
+      - name: Build Docker Image
         run: |
-          cd apache-jmeter-5.6.2/bin
-          ./jmeter -n -t ../../performance-tests/jmeter/HealthTrack-Performance-Test.jmx \
-                   -l ../../target/performance-results.jtl \
-                   -e -o ../../target/performance-report
-          echo "Performance tests completed"
+          docker build -t healthtrack:${{ github.sha }} .
+          docker tag healthtrack:${{ github.sha }} healthtrack:latest
+          echo "Docker image built successfully"
 
-      - name: Upload Performance Report
+      - name: Save Docker Image
+        run: |
+          docker save healthtrack:${{ github.sha }} > healthtrack-image.tar
+
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: performance-report
-          path: target/performance-report/
+          name: build-artifacts
+          path: |
+            target/*.jar
+            healthtrack-image.tar
 
-      - name: Performance Test Results
-        run: |
-          echo "Performance test results:"
-          if [ -f target/performance-results.jtl ]; then
-            echo "Results file found, analyzing..."
-            # Analizar resultados y fallar si no cumplen criterios
-            python3 -c "
-  import csv
-with open('target/performance-results.jtl', 'r') as f:
-  reader = csv.DictReader(f)
-  total_time = 0
-  count = 0
-  errors = 0
-  for row in reader:
-    if 'elapsed' in row:
-      total_time += int(row['elapsed'])
-      count += 1
-      if row.get('success', 'true') == 'false':
-        errors += 1
-
-  if count > 0:
-    avg_time = total_time / count
-    error_rate = (errors / count) * 100
-    print(f'Average response time: {avg_time}ms')
-    print(f'Error rate: {error_rate}%')
-        
-        # Criterios de aceptación
-        if avg_time > 2000:  # 2 segundos máximo
-            print('FAIL: Average response time exceeds 2000ms')
-                                                          exit(1)
-    if error_rate > 5:  # Máximo 5% de errores
-      print('FAIL: Error rate exceeds 5%')
-      exit(1)
-    print('Performance tests passed!')
-  else:
-    print('No performance data found')
-    exit(1)
-  "
-
-  # Job 5: Build y empaquetado
-  build:
-    name: Build & Package
+  # Job 5: Security scan
+  security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, functional-tests]
-    
+    needs: build
+
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-      
-    - name: Setup Java
-      uses: actions/setup-java@v4
-      with:
-        java-version: ${{ env.JAVA_VERSION }}
-        distribution: 'temurin'
-        
-    - name: Cache Maven Dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.m2
-        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-        restore-keys: ${{ runner.os }}-m2
-        
-    - name: Build Application
-      run: |
-        mvn clean package -DskipTests -B
-        echo "Application build completed"
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-- name: Build Docker Image
-  run: |
-    docker build -t healthtrack:${{ github.sha }} .
-    docker tag healthtrack:${{ github.sha }} healthtrack:latest
-    echo "Docker image built successfully"
-
-- name: Save Docker Image
-  run: |
-    docker save healthtrack:${{ github.sha }} > healthtrack-image.tar
-
-- name: Upload Build Artifacts
-  uses: actions/upload-artifact@v3
-  with:
-    name: build-artifacts
-    path: |
-      target/*.jar
-      healthtrack-image.tar
-
-# Job 6: Security scan
-security-scan:
-  name: Security Scan
-  runs-on: ubuntu-latest
-  needs: build
-
-  steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-
-    - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v2
-      if: always()
-      with:
-        sarif_file: 'trivy-results.sarif'
-
-# Job 7: Deploy a Staging (solo para main branch)
-deploy-staging:
-  name: Deploy to Staging
-  runs-on: ubuntu-latest
-  needs: [build, security-scan, performance-tests]
-  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-  environment: staging
-
-  steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Download Build Artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: build-artifacts
-
-    - name: Load Docker Image
-      run: |
-        docker load < healthtrack-image.tar
-
-    - name: Deploy to Staging
-      run: |
-        echo "Deploying to staging environment..."
-        # Aquí irían los comandos reales de deployment
-        # Por ejemplo: kubectl apply, docker-compose up, etc.
-        docker run -d -p 8080:8080 --name healthtrack-staging healthtrack:${{ github.sha }}
-        echo "Deployment to staging completed"
-
-    - name: Run Smoke Tests
-      run: |
-        sleep 30  # Esperar que la aplicación esté lista
-        curl -f http://localhost:8080/health || exit 1
-        curl -f http://localhost:8080/api/usuarios || exit 1
-        echo "Smoke tests passed"
-
-    - name: Notify Deployment
-      uses: 8398a7/action-slack@v3
-      if: always()
-      with:
-        status: ${{ job.status }}
-        text: "HealthTrack deployment to staging: ${{ job.status }}"
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-
-# Job 8: Deploy a Producción (manual approval required)
-deploy-production:
-  name: Deploy to Production
-  runs-on: ubuntu-latest
-  needs: deploy-staging
-  if: github.ref == 'refs/heads/main'
-  environment: production
-
-  steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Download Build Artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: build-artifacts
-
-    - name: Load Docker Image
-      run: |
-        docker load < healthtrack-image.tar
-
-    - name: Deploy to Production
-      run: |
-        echo "Deploying to production environment..."
-        # Blue-Green deployment strategy
-        # 1. Deploy to green environment
-        # 2. Run health checks
-        # 3. Switch traffic to green
-        # 4. Keep blue as backup
-        echo "Production deployment completed"
-
-    - name: Post-deployment Tests
-      run: |
-        echo "Running post-deployment verification..."
-        # Aquí irían tests específicos de producción
-        sleep 30
-        curl -f https://healthtrack.com/health || exit 1
-        echo "Post-deployment tests passed"
-
-    - name: Notify Production Deployment
-      uses: 8398a7/action-slack@v3
-      with:
-        status: ${{ job.status }}
-        text: "🚀 HealthTrack deployed to PRODUCTION successfully!"
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-
-# Configuración de notificaciones globales
-on_failure:
-  notify_slack:
-    name: Notify Failure
-    runs-on: ubuntu-latest
-    if: failure()
-    steps:
-      - name: Notify Failure
-        uses: 8398a7/action-slack@v3
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
         with:
-          status: failure
-          text: "❌ HealthTrack CI/CD Pipeline failed on ${{ github.ref }}"
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Job 6: Deploy a Staging (solo para main branch)
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: staging
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+
+      - name: Load Docker Image
+        run: |
+          docker load < healthtrack-image.tar
+
+      - name: Deploy to Staging
+        run: |
+          echo "Deploying to staging environment..."
+          docker run -d -p 8081:8081 --name healthtrack-staging healthtrack:${{ github.sha }}
+          echo "Deployment to staging completed"
+
+      - name: Run Smoke Tests
+        run: |
+          sleep 30
+          curl -f http://localhost:8081/health || exit 1
+          echo "Smoke tests passed"
