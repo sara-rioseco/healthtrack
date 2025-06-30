@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HealthTrack - Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .form-group {
+            margin: 15px 0;
+        }
+
+        input, button {
+            padding: 10px;
+            margin: 5px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        .success {
+            color: green;
+            padding: 10px;
+            background-color: #d4edda;
+        }
+
+        .error {
+            color: red;
+            padding: 10px;
+            background-color: #f8d7da;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>HealthTrack — Dashboard</h1>
+
+    <!-- Información del usuario actual -->
+    <div th:if="${usuario}" class="user-info">
+        <h2>Información del Usuario</h2>
+        <p><strong>Nombre:</strong> <span id="nombre-usuario" th:text="${usuario.nombre}">Usuario</span></p>
+        <p><strong>Peso Actual:</strong> <span id="peso-actual" th:text="${usuario.peso} + ' kg'">0.0 kg</span></p>
+    </div>
+
+    <!-- Formulario de actualización de peso -->
+    <h2>Actualizar Peso</h2>
+    <form id="peso-form">
+        <div class="form-group">
+            <label for="nombre">Nombre:</label>
+            <input type="text" id="nombre" name="nombre" required
+                   th:value="${usuario != null ? usuario.nombre : ''}">
+        </div>
+
+        <div class="form-group">
+            <label for="peso">Nuevo Peso (kg):</label>
+            <input type="number" id="peso" name="peso" step="0.1" min="1" max="500" required>
+        </div>
+
+        <button type="submit" id="actualizar-peso">Actualizar Peso</button>
+    </form>
+
+    <!-- Mensajes de respuesta -->
+    <div id="mensaje-exito" class="success" style="display: none;"></div>
+    <div id="mensaje-error" class="error" style="display: none;"></div>
+
+    <!-- Historial de peso (simulado) -->
+    <div id="historial-peso" style="margin-top: 20px;">
+        <h3>Historial de Peso</h3>
+        <div th:if="${usuario}">
+            <p>Último peso registrado: <span th:text="${usuario.peso}">0.0</span> kg</p>
+        </div>
+    </div>
+
+    <!-- Gráfico placeholder -->
+    <div id="grafico-peso"
+         style="width: 100%; height: 200px; background-color: #f0f0f0; margin-top: 20px; display: flex; align-items: center; justify-content: center;">
+        <p>Gráfico de Evolución del Peso</p>
+    </div>
+
+    <!-- Navegación -->
+    <div style="margin-top: 30px;">
+        <a href="/perfil">Ver Perfil</a> |
+        <a href="/registro">Registrar Nuevo Usuario</a>
+    </div>
+</div>
+
+<script>
+    document.getElementById('peso-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const nombre = document.getElementById('nombre').value;
+        const peso = document.getElementById('peso').value;
+
+        const formData = new FormData();
+        formData.append('nombre', nombre);
+        formData.append('peso', peso);
+
+        fetch('/api/usuarios/actualizar-peso', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                const mensajeExito = document.getElementById('mensaje-exito');
+                const mensajeError = document.getElementById('mensaje-error');
+
+                if (data.success) {
+                    mensajeExito.textContent = data.message;
+                    mensajeExito.style.display = 'block';
+                    mensajeError.style.display = 'none';
+
+                    // Actualizar peso mostrado
+                    document.getElementById('peso-actual').textContent = data.pesoActual + ' kg';
+
+                    // Limpiar formulario
+                    document.getElementById('peso').value = '';
+                } else {
+                    mensajeError.textContent = data.message;
+                    mensajeError.style.display = 'block';
+                    mensajeExito.style.display = 'none';
+                }
+            })
+            .catch(error => {
+                const mensajeError = document.getElementById('mensaje-error');
+                mensajeError.textContent = 'Error de conexión';
+                mensajeError.style.display = 'block';
+                document.getElementById('mensaje-exito').style.display = 'none';
+            });
+    });
+</script>
+</body>
+</html>

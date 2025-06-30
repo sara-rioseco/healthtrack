@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HealthTrack - Registro</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .form-group {
+            margin: 15px 0;
+        }
+
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            width: 200px;
+        }
+
+        button {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        .success {
+            color: green;
+            padding: 10px;
+            background-color: #d4edda;
+        }
+
+        .error {
+            color: red;
+            padding: 10px;
+            background-color: #f8d7da;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>HealthTrack - Registro de Usuario</h1>
+
+    <form id="registro-form">
+        <div class="form-group">
+            <label for="nombre">Nombre Completo:</label>
+            <input type="text" id="nombre" name="nombre" required>
+        </div>
+
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+
+        <div class="form-group">
+            <label for="peso-inicial">Peso Inicial (kg):</label>
+            <input type="number" id="peso-inicial" name="pesoInicial" step="0.1" min="1" max="500" required>
+        </div>
+
+        <button type="submit" id="registrar">Registrar Usuario</button>
+    </form>
+
+    <!-- Mensajes de respuesta -->
+    <div id="registro-exitoso" class="success" style="display: none;"></div>
+    <div id="error-email" class="error" style="display: none;"></div>
+    <div id="error-peso" class="error" style="display: none;"></div>
+    <div id="error-general" class="error" style="display: none;"></div>
+
+    <div style="margin-top: 30px;">
+        <a href="/usuario/dashboard">Ir al Dashboard</a>
+    </div>
+</div>
+
+<script>
+    document.getElementById('registro-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        // Limpiar mensajes previos
+        document.querySelectorAll('.success, .error').forEach(el => el.style.display = 'none');
+
+        const formData = new FormData();
+        formData.append('nombre', document.getElementById('nombre').value);
+        formData.append('email', document.getElementById('email').value);
+        formData.append('pesoInicial', document.getElementById('peso-inicial').value);
+
+        fetch('/api/usuarios/registrar', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const exitoso = document.getElementById('registro-exitoso');
+                    exitoso.textContent = data.message;
+                    exitoso.style.display = 'block';
+
+                    // Redireccionar después de 2 segundos
+                    setTimeout(() => {
+                        window.location.href = data.redirectUrl;
+                    }, 2000);
+                } else {
+                    // Mostrar error específico
+                    let errorElement;
+                    if (data.message.includes('Email')) {
+                        errorElement = document.getElementById('error-email');
+                    } else if (data.message.includes('peso')) {
+                        errorElement = document.getElementById('error-peso');
+                    } else {
+                        errorElement = document.getElementById('error-general');
+                    }
+
+                    errorElement.textContent = data.message;
+                    errorElement.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                const errorGeneral = document.getElementById('error-general');
+                errorGeneral.textContent = 'Error de conexión';
+                errorGeneral.style.display = 'block';
+            });
+    });
+</script>
+</body>
+</html>
