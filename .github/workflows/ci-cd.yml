@@ -235,8 +235,28 @@ jobs:
 
       - name: Build Application
         run: |
-          mvn clean package -DskipTests -B
-          echo "Application build completed"
+          echo "Building Spring Boot executable JAR..."
+          
+          # Clean and package with Spring Boot repackaging
+          mvn clean package spring-boot:repackage -DskipTests -B
+          
+          echo "=== Verifying JAR file ==="
+          JAR_FILE=$(find target -name "*.jar" -not -name "*original*" | head -1)
+          
+          if [ -z "$JAR_FILE" ]; then
+              echo "❌ No JAR file found!"
+              ls -la target/
+              exit 1
+          fi
+          
+          echo "Generated JAR: $JAR_FILE"
+          echo "JAR size: $(du -h "$JAR_FILE")"
+          
+          # Check if it has Main-Class
+          echo "=== Checking MANIFEST.MF ==="
+          unzip -p "$JAR_FILE" META-INF/MANIFEST.MF | grep -E "(Main-Class|Start-Class)" || echo "Checking manifest..."
+          
+          echo "✅ Application build completed"
 
       - name: Build Docker Image
         run: |
