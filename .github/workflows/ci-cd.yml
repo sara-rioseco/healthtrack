@@ -7,6 +7,14 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: write
+  issues: write
+  statuses: write
+
 env:
   JAVA_VERSION: '21'
   MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false
